@@ -38,11 +38,18 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'internal error' });
 });
 
+const { ready: dbReady } = require('./services/db');
+
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  // eslint-disable-next-line no-console
-  console.log(`UAT Management App listening on http://localhost:${PORT}`);
-  console.log(`  Dashboard: http://localhost:${PORT}/dashboard`);
+dbReady.then(() => {
+  app.listen(PORT, () => {
+    // eslint-disable-next-line no-console
+    console.log(`UAT Management App listening on http://localhost:${PORT}`);
+    console.log(`  Dashboard: http://localhost:${PORT}/dashboard`);
+  });
+}).catch((err) => {
+  console.error('[server] failed to initialise database:', err);
+  process.exit(1);
 });
 
 module.exports = app;

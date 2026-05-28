@@ -12,7 +12,9 @@ router.get('/dashboard', (req, res) => {
 
 router.get('/api/cycles', (req, res) => {
   try {
-    res.json(db.listCycles());
+    const cycles = db.listCycles();
+    console.log(`[dashboard] GET /api/cycles — returning ${cycles.length} cycle(s)`, cycles);
+    res.json(cycles);
   } catch (err) {
     console.error('[dashboard] /api/cycles error:', err);
     res.status(500).json({ error: 'internal error' });
