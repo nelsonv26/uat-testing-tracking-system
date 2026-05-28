@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>UAT — Tester</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --panel: #181b24;
+      --panel-2: #1f232f;
+      --border: #2a2f3d;
+      --text: #e6e8ee;
+      --muted: #8b91a3;
+      --accent: #5b8cff;
+      --green: #34d399;
+      --red: #f87171;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--bg); color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.5; display: flex; justify-content: center; padding: 40px 16px;
+    }
+    .card {
+      width: 100%; max-width: 640px; background: var(--panel);
+      border: 1px solid var(--border); border-radius: 16px; padding: 28px;
+    }
+    h1 { margin: 0 0 4px; font-size: 20px; }
+    .sub { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+    .meta { color: var(--muted); font-size: 13px; }
+    .row { margin-bottom: 14px; }
+    label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+    textarea {
+      width: 100%; min-height: 160px; resize: vertical; background: var(--panel-2);
+      color: var(--text); border: 1px solid var(--border); border-radius: 10px;
+      padding: 12px 14px; font: inherit; font-size: 14px;
+    }
+    textarea:focus { outline: none; border-color: var(--accent); }
+    .actions { display: flex; gap: 12px; align-items: center; margin-top: 16px; }
+    button {
+      font: inherit; font-weight: 600; border: none; border-radius: 10px;
+      padding: 11px 18px; cursor: pointer;
+    }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:disabled { opacity: .5; cursor: not-allowed; }
+    .btn-ghost { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); }
+    a { color: var(--accent); }
+    .status-pill {
+      display: inline-block; font-size: 12px; padding: 4px 10px; border-radius: 999px;
+      text-transform: uppercase; letter-spacing: .4px;
+    }
+    .pill-done { background: rgba(52,211,153,.15); color: var(--green); }
+    .pill-pending { background: rgba(251,191,36,.15); color: #fbbf24; }
+    .toast { font-size: 13px; }
+    .toast.ok { color: var(--green); }
+    .toast.err { color: var(--red); }
+    .links { font-size: 13px; margin: 16px 0; display: flex; gap: 18px; flex-wrap: wrap; }
+    .completed-banner {
+      background: rgba(52,211,153,.1); border: 1px solid rgba(52,211,153,.3);
+      color: var(--green); padding: 10px 14px; border-radius: 10px; font-size: 14px; margin-bottom: 16px;
+    }
+  </style>
+</head>
+<body>
+  <div class="card" id="root"><div class="meta">Loading…</div></div>
+
+  <script>
+    const parts = location.pathname.split('/').filter(Boolean); // ['tester', userId, cycleId]
+    const slackUserId = decodeURIComponent(parts[1] || '');
+    const cycleId = parts[2] || '';
+    const root = document.getElementById('root');
+
+    function esc(s) {
+      return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      }[c]));
+    }
+
+    async function load() {
+      const res = await fetch(`/api/tester/${encodeURIComponent(slackUserId)}/${cycleId}`);
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}));
+        root.innerHTML = `<h1>Unavailable</h1><div class="sub">${esc(e.error || 'Could not load this UAT cycle.')}</div>`;
+        return;
+      }
+      const data = await res.json();
+      render(data);
+    }
+
+    function render(data) {
+      const { cycle, assignment } = data;
+      const due = cycle.due_date ? ` · Due ${esc(cycle.due_date)}` : '';
+      const completed = assignment.completed;
+      root.innerHTML = `
+        <h1>${esc(cycle.jira_epic_name)}</h1>
+        <div class="sub">${esc(cycle.jira_epic_key)}${due} &middot;
+          <span class="status-pill ${completed ? 'pill-done' : 'pill-pending'}">
+            ${completed ? 'Completed' : 'Pending'}</span>
+        </div>
+        ${completed ? `<div class="completed-banner">You marked this complete on ${esc(assignment.completed_at)} UTC. You can still update your notes below.</div>` : ''}
+        <div class="links">
+          <a href="${esc(cycle.jira_url)}" target="_blank" rel="noopener">Open Jira epic ↗</a>
+        </div>
+        <div class="meta" style="margin-bottom:16px;">Signed in as <strong>${esc(assignment.name || slackUserId)}</strong></div>
+        <div class="row">
+          <label for="notes">Your testing notes</label>
+          <textarea id="notes" placeholder="What did you test? Any bugs, blockers, or observations…">${esc(assignment.notes)}</textarea>
+        </div>
+        <div class="actions">
+          <button class="btn-primary" id="complete">${completed ? 'Update & keep complete' : 'Mark as complete'}</button>
+          <button class="btn-ghost" id="save">Save notes</button>
+          <span class="toast" id="toast"></span>
+        </div>`;
+
+      document.getElementById('save').addEventListener('click', saveNotes);
+      document.getElementById('complete').addEventListener('click', complete);
+    }
+
+    function notesVal() { return document.getElementById('notes').value; }
+    function toast(msg, ok) {
+      const t = document.getElementById('toast');
+      t.textContent = msg; t.className = 'toast ' + (ok ? 'ok' : 'err');
+    }
+
+    async function saveNotes() {
+      try {
+        const res = await fetch('/api/tester/notes', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ slackUserId, cycleId, notes: notesVal() }),
+        });
+        toast(res.ok ? 'Notes saved.' : 'Save failed.', res.ok);
+      } catch (e) { toast('Save failed.', false); }
+    }
+
+    async function complete() {
+      const btn = document.getElementById('complete');
+      btn.disabled = true;
+      try {
+        const res = await fetch('/api/tester/complete', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ slackUserId, cycleId, notes: notesVal() }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok) {
+          toast(data.allDone ? 'Complete! All testers are done 🎉' : 'Marked complete. Thank you!', true);
+          await load();
+        } else {
+          toast(data.error || 'Could not mark complete.', false);
+          btn.disabled = false;
+        }
+      } catch (e) {
+        toast('Could not mark complete.', false);
+        btn.disabled = false;
+      }
+    }
+
+    load();
+  </script>
+</body>
+</html>

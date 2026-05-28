@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm --version)",
+      "Bash(npm install *)",
+      "Bash(node server.js)",
+      "Bash(curl -s http://localhost:3000/health)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" -X POST \"http://localhost:3000/webhook/jira?secret=wrong\" -H \"Content-Type: application/json\" -d '{}')",
+      "Bash(curl -s -X POST \"http://localhost:3000/webhook/jira?secret=test-secret-123\" -H \"Content-Type: application/json\" -d '{\"issue\":{\"key\":\"TEST-9\",\"fields\":{\"summary\":\"x\",\"issuetype\":{\"name\":\"Story\"},\"status\":{\"name\":\"Ready for UAT\"}}},\"changelog\":{\"items\":[{\"field\":\"status\",\"toString\":\"Ready for UAT\"}]}}')",
+      "Bash(curl -s -X POST \"http://localhost:3000/webhook/jira?secret=test-secret-123\" -H \"Content-Type: application/json\" -d '{\"issue\":{\"key\":\"TEST-123\",\"fields\":{\"summary\":\"Checkout revamp\",\"issuetype\":{\"name\":\"Epic\"},\"status\":{\"name\":\"Ready for UAT\"},\"duedate\":\"2026-06-15\"}},\"changelog\":{\"items\":[{\"field\":\"status\",\"toString\":\"Ready for UAT\"}]}}')",
+      "Bash(curl -s -X POST \"http://localhost:3000/webhook/jira?secret=test-secret-123\" -H \"Content-Type: application/json\" -d '{\"issue\":{\"key\":\"TEST-123\",\"fields\":{\"summary\":\"Checkout revamp\",\"issuetype\":{\"name\":\"Epic\"},\"status\":{\"name\":\"Ready for UAT\"}}},\"changelog\":{\"items\":[{\"field\":\"status\",\"toString\":\"Ready for UAT\"}]}}')",
+      "Bash(curl -s http://localhost:3000/api/cycles)",
+      "Bash(curl -s http://localhost:3000/api/cycles/1)",
+      "Bash(curl -s http://localhost:3000/api/tester/U02/1)",
+      "Bash(curl -s -X POST http://localhost:3000/api/tester/complete -H \"Content-Type: application/json\" -d '{\"slackUserId\":\"U02\",\"cycleId\":1,\"notes\":\"Tested checkout, all good\"}')",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:3000/api/tester/U99/1)",
+      "Bash(curl -s -X POST http://localhost:3000/api/tester/complete -H \"Content-Type: application/json\" -d '{\"slackUserId\":\"U01\",\"cycleId\":1,\"notes\":\"ok\"}')",
+      "Bash(curl -s -X POST http://localhost:3000/api/tester/complete -H \"Content-Type: application/json\" -d '{\"slackUserId\":\"U03\",\"cycleId\":1,\"notes\":\"ok\"}')",
+      "Bash(node -e \"process.stdin.on\\('data',d=>{const c=JSON.parse\\(d\\)[0];console.log\\('status='+c.status,c.completed_testers+'/'+c.total_testers\\)}\\)\")",
+      "Bash(node -e \"require\\('dotenv'\\).config\\(\\); const s=require\\('./services/slack'\\); const md=s.buildCanvasMarkdown\\({jira_epic_name:'Checkout revamp',jira_epic_key:'TEST-123',due_date:'2026-06-15'},[{name:'Alice',completed:1},{name:'Bob',completed:0}],'https://adoreal.atlassian.net/browse/TEST-123'\\); console.log\\(md\\)\")",
+      "Bash(taskkill //F //IM node.exe)"
+    ]
+  }
+}

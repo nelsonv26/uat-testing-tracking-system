@@ -1,0 +1,17 @@
+{
+  "name": "uat-management-app",
+  "version": "1.0.0",
+  "description": "Local UAT Management App — Jira webhook to Slack Canvas + tester dashboard",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "@slack/web-api": "^7.8.0",
+    "better-sqlite3": "^11.8.1",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2"
+  }
+}

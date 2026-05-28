@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>UAT Dashboard</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --panel: #181b24;
+      --panel-2: #1f232f;
+      --border: #2a2f3d;
+      --text: #e6e8ee;
+      --muted: #8b91a3;
+      --accent: #5b8cff;
+      --green: #34d399;
+      --amber: #fbbf24;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--bg); color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.5;
+    }
+    header {
+      padding: 20px 28px; border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    header h1 { margin: 0; font-size: 20px; letter-spacing: .3px; }
+    header .sub { color: var(--muted); font-size: 13px; }
+    .wrap { max-width: 1000px; margin: 0 auto; padding: 24px 28px; }
+    .cycle {
+      background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+      padding: 18px 20px; margin-bottom: 16px; cursor: pointer; transition: border-color .15s;
+    }
+    .cycle:hover { border-color: var(--accent); }
+    .cycle-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+    .cycle h2 { margin: 0 0 4px; font-size: 16px; }
+    .cycle .key { color: var(--muted); font-size: 12px; }
+    .badge {
+      font-size: 11px; text-transform: uppercase; letter-spacing: .5px;
+      padding: 3px 9px; border-radius: 999px; white-space: nowrap;
+    }
+    .badge.active { background: rgba(91,140,255,.15); color: var(--accent); }
+    .badge.closed { background: rgba(52,211,153,.15); color: var(--green); }
+    .progress { margin-top: 14px; }
+    .bar { height: 8px; background: var(--panel-2); border-radius: 999px; overflow: hidden; }
+    .bar > span { display: block; height: 100%; background: var(--green); border-radius: 999px; transition: width .3s; }
+    .progress .label { font-size: 12px; color: var(--muted); margin-top: 6px; }
+    .detail { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 14px; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+    th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .4px; }
+    .status-done { color: var(--green); font-weight: 600; }
+    .status-pending { color: var(--amber); }
+    .notes { color: var(--muted); white-space: pre-wrap; }
+    .empty { color: var(--muted); text-align: center; padding: 60px 0; }
+    a { color: var(--accent); }
+    .meta { color: var(--muted); font-size: 12px; margin-top: 4px; }
+    .refresh { font-size: 12px; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>UAT Dashboard</h1>
+      <div class="sub">Monitor every UAT cycle in real time</div>
+    </div>
+    <div class="refresh">auto-refresh: 10s</div>
+  </header>
+  <div class="wrap" id="root">
+    <div class="empty">Loading…</div>
+  </div>
+
+  <script>
+    const root = document.getElementById('root');
+    const expanded = new Set();
+    const detailCache = {};
+
+    function esc(s) {
+      return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      }[c]));
+    }
+
+    async function loadCycles() {
+      const res = await fetch('/api/cycles');
+      const cycles = await res.json();
+      render(cycles);
+    }
+
+    async function loadDetail(id) {
+      const res = await fetch('/api/cycles/' + id);
+      detailCache[id] = await res.json();
+    }
+
+    function render(cycles) {
+      if (!cycles.length) {
+        root.innerHTML = '<div class="empty">No UAT cycles yet. They appear here when an epic moves to “Ready for UAT”.</div>';
+        return;
+      }
+      root.innerHTML = cycles.map(renderCycle).join('');
+      for (const c of cycles) {
+        const el = document.getElementById('cycle-' + c.id);
+        el.querySelector('.cycle-top').addEventListener('click', () => toggle(c.id));
+        if (expanded.has(c.id) && detailCache[c.id]) {
+          el.querySelector('.detail-slot').innerHTML = renderDetail(detailCache[c.id]);
+        }
+      }
+    }
+
+    function renderCycle(c) {
+      const pct = c.total_testers ? Math.round((c.completed_testers / c.total_testers) * 100) : 0;
+      const due = c.due_date ? ` · Due ${esc(c.due_date)}` : '';
+      return `
+        <div class="cycle" id="cycle-${c.id}">
+          <div class="cycle-top">
+            <div>
+              <h2>${esc(c.jira_epic_name)}</h2>
+              <div class="key">${esc(c.jira_epic_key)}${due} · created ${esc(c.created_at)} UTC</div>
+            </div>
+            <span class="badge ${c.status}">${esc(c.status)}</span>
+          </div>
+          <div class="progress">
+            <div class="bar"><span style="width:${pct}%"></span></div>
+            <div class="label">${c.completed_testers}/${c.total_testers} testers completed (${pct}%)</div>
+          </div>
+          <div class="detail-slot"></div>
+        </div>`;
+    }
+
+    function renderDetail(d) {
+      if (!d.assignments || !d.assignments.length) {
+        return '<div class="detail"><div class="meta">No testers assigned.</div></div>';
+      }
+      const rows = d.assignments.map((a) => `
+        <tr>
+          <td>${esc(a.name || a.slack_user_id)}</td>
+          <td>${a.completed
+            ? '<span class="status-done">Done</span>'
+            : '<span class="status-pending">Pending</span>'}</td>
+          <td class="notes">${esc(a.notes) || '<span class="meta">—</span>'}</td>
+          <td class="meta">${a.completed_at ? esc(a.completed_at) + ' UTC' : '—'}</td>
+        </tr>`).join('');
+      const jira = `<div class="meta">Jira epic: <a href="${esc(d.jira_url || '#')}" target="_blank" rel="noopener">${esc(d.jira_epic_key)}</a></div>`;
+      return `
+        <div class="detail">
+          ${jira}
+          <table>
+            <thead><tr><th>Tester</th><th>Status</th><th>Notes</th><th>Completed</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>`;
+    }
+
+    async function toggle(id) {
+      if (expanded.has(id)) {
+        expanded.delete(id);
+      } else {
+        expanded.add(id);
+        await loadDetail(id);
+      }
+      const slot = document.querySelector('#cycle-' + id + ' .detail-slot');
+      if (slot) slot.innerHTML = expanded.has(id) ? renderDetail(detailCache[id]) : '';
+    }
+
+    async function tick() {
+      try {
+        await loadCycles();
+        for (const id of expanded) await loadDetail(id);
+        for (const id of expanded) {
+          const slot = document.querySelector('#cycle-' + id + ' .detail-slot');
+          if (slot) slot.innerHTML = renderDetail(detailCache[id]);
+        }
+      } catch (e) { /* keep last view on transient errors */ }
+    }
+
+    loadCycles();
+    setInterval(tick, 10000);
+  </script>
+</body>
+</html>
