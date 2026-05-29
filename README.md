@@ -7,12 +7,18 @@ When an **Epic** moves to **"Ready for UAT"** in Jira, the app:
 
 1. Creates a **Slack Canvas** in the UAT channel with a checklist of testers, the
    Jira link, and instructions.
-2. **DMs each tester** the UAT name, due date, canvas link, Jira link, and a
-   personal link to their tester page.
-3. Serves a **dashboard** (`/dashboard`) for Patrick to watch progress live.
-4. Serves a **tester page** (`/tester/:slackUserId/:cycleId`) where each tester
+2. **Posts a channel announcement** with the epic name, due date, and a personal
+   link for each tester.
+3. **DMs each tester** individually with the epic details and their personal tester
+   page link.
+4. **Sends daily deadline reminders** (via `node-cron` at 9 AM) to the channel and
+   to each incomplete tester at 3 days out, 1 day out, and on the due date.
+5. Serves a **dashboard** (`/dashboard`) for Patrick to watch progress live.
+6. Serves a **tester page** (`/tester/:slackUserId/:cycleId`) where each tester
    leaves notes and marks themselves done — which checks their box on the Canvas
    and posts a confirmation in the channel.
+7. Provides a **settings page** (`/settings`) to manage the tester roster and Slack
+   channel without touching `.env`.
 
 > **Scope:** this app is wired to a **test** Jira project and a **test** Slack
 > channel only. The channel ID and project key come entirely from `.env` —
@@ -23,8 +29,9 @@ When an **Epic** moves to **"Ready for UAT"** in Jira, the app:
 ## Tech stack
 
 - Node.js + Express
-- SQLite via `better-sqlite3` (file lives in `./data/uat.db`)
+- SQLite via `sql.js` (file lives in `./data/uat.db`)
 - Slack Web API (`@slack/web-api`)
+- `node-cron` for daily deadline reminders
 - Vanilla HTML/CSS/JS frontend (dark theme)
 
 ---
@@ -87,9 +94,10 @@ Copy `.env.example` to `.env` and fill in:
    - `canvases:read` — read canvas metadata
    - `files:read` — fetch the canvas permalink for shareable links
    - `chat:write` — post messages / DMs
-   - `im:write` — open DM channels with testers
+   - `im:write` — open DM channels with testers *(required for cycle-start DMs and deadline reminders)*
    - `users:read` — resolve tester display names
    - `channels:read` (public UAT channel) **or** `groups:read` (private channel)
+   - `bookmarks:write` — pin canvases as channel bookmarks *(optional, for future use)*
 3. Click **Install to Workspace** and copy the **Bot User OAuth Token**
    (`xoxb-…`) into `SLACK_BOT_TOKEN`.
 4. **Invite the bot to the UAT channel**: in Slack, open the channel and type
@@ -164,12 +172,18 @@ epic key** — repeat fires for an epic that already has an active cycle return
 | --- | --- | --- |
 | `POST` | `/webhook/jira` | Jira webhook receiver (secret-protected). |
 | `GET` | `/dashboard` | Patrick's dashboard UI. |
+| `GET` | `/settings` | Admin settings page (tester roster + channel). |
 | `GET` | `/tester/:slackUserId/:cycleId` | Tester UI. |
 | `GET` | `/api/cycles` | JSON list of all cycles + progress counts. |
 | `GET` | `/api/cycles/:id` | JSON detail of one cycle incl. assignments. |
 | `GET` | `/api/tester/:slackUserId/:cycleId` | JSON for the tester page. |
 | `POST` | `/api/tester/notes` | Save notes (no completion). |
 | `POST` | `/api/tester/complete` | Mark complete + save notes + Slack side effects. |
+| `GET` | `/api/settings/testers` | List tester roster (seeds from env on first call). |
+| `POST` | `/api/settings/testers` | Add tester `{ slack_user_id, name }`. |
+| `DELETE` | `/api/settings/testers/:id` | Remove tester. |
+| `GET` | `/api/settings/channel` | Get current channel ID + resolved name. |
+| `POST` | `/api/settings/channel` | Update channel `{ channel_id }`. |
 | `GET` | `/health` | Health check. |
 
 ### Manually testing the webhook
@@ -205,14 +219,17 @@ Then open <http://localhost:3000/dashboard>.
 ├── routes/
 │   ├── webhook.js         # Jira webhook handler + cycle orchestration
 │   ├── dashboard.js       # Patrick's UI + cycle JSON endpoints
-│   └── tester.js          # Tester UI + complete/notes endpoints
+│   ├── tester.js          # Tester UI + complete/notes endpoints
+│   └── settings.js        # Tester roster + Slack channel config endpoints
 ├── services/
-│   ├── slack.js           # All Slack API calls (canvas, DMs, channel posts)
-│   ├── db.js              # SQLite setup + queries
-│   └── config.js          # Env-derived helpers (testers, URLs)
+│   ├── slack.js           # All Slack API calls (canvas, DMs, reminders, channel posts)
+│   ├── db.js              # SQLite setup + queries (uat_cycles, tester_assignments, tester_roster, app_config)
+│   ├── scheduler.js       # Daily 9 AM deadline reminder cron job
+│   └── config.js          # Env-derived helpers (URLs, trigger status)
 ├── public/
 │   ├── dashboard.html
-│   └── tester.html
+│   ├── tester.html
+│   └── settings.html
 ├── data/                  # SQLite db lives here (gitignored)
 ├── .env.example
 ├── package.json

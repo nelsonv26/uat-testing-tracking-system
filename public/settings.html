@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>UAT Settings</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --panel: #181b24;
+      --panel-2: #1f232f;
+      --border: #2a2f3d;
+      --text: #e6e8ee;
+      --muted: #8b91a3;
+      --accent: #5b8cff;
+      --green: #34d399;
+      --amber: #fbbf24;
+      --red: #f87171;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--bg); color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.5;
+    }
+    header {
+      padding: 20px 28px; border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    header h1 { margin: 0; font-size: 20px; letter-spacing: .3px; }
+    header .sub { color: var(--muted); font-size: 13px; }
+    header nav { display: flex; gap: 20px; align-items: center; }
+    header nav a { color: var(--muted); text-decoration: none; font-size: 14px; }
+    header nav a:hover { color: var(--text); }
+    header nav a.active { color: var(--accent); }
+    .wrap { max-width: 760px; margin: 0 auto; padding: 28px 28px; }
+    section {
+      background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+      padding: 22px 24px; margin-bottom: 24px;
+    }
+    section h2 { margin: 0 0 4px; font-size: 15px; }
+    section .desc { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+    th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .4px; }
+    tr:last-child td { border-bottom: none; }
+    .badge-active { color: var(--green); font-size: 11px; }
+    .row-form { display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
+    input[type="text"] {
+      background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+      border-radius: 7px; padding: 8px 12px; font-size: 13px; outline: none;
+      transition: border-color .15s;
+    }
+    input[type="text"]:focus { border-color: var(--accent); }
+    input.wide { flex: 1; min-width: 180px; }
+    button {
+      border: none; border-radius: 7px; padding: 8px 16px; font-size: 13px;
+      font-weight: 600; cursor: pointer; transition: opacity .15s;
+    }
+    button:hover { opacity: .85; }
+    button.primary { background: var(--accent); color: #fff; }
+    button.danger  { background: transparent; border: 1px solid var(--border); color: var(--red); }
+    button.danger:hover { border-color: var(--red); }
+    .flash {
+      display: none; font-size: 12px; padding: 6px 12px; border-radius: 6px;
+      margin-top: 12px;
+    }
+    .flash.ok  { background: rgba(52,211,153,.12); color: var(--green); display: block; }
+    .flash.err { background: rgba(248,113,113,.12); color: var(--red); display: block; }
+    .channel-meta { font-size: 12px; color: var(--muted); margin-top: 8px; min-height: 18px; }
+    .empty-row td { color: var(--muted); font-size: 13px; padding: 14px 10px; }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>UAT Settings</h1>
+      <div class="sub">Manage testers and Slack configuration</div>
+    </div>
+    <nav>
+      <a href="/dashboard">Dashboard</a>
+      <a href="/settings" class="active">⚙️ Settings</a>
+    </nav>
+  </header>
+
+  <div class="wrap">
+
+    <!-- Section A: Tester Roster -->
+    <section id="sec-testers">
+      <h2>Tester Roster</h2>
+      <p class="desc">Active testers are assigned to every new UAT cycle. Changes take effect on the next cycle.</p>
+      <table id="tester-table">
+        <thead>
+          <tr><th>Name</th><th>Slack User ID</th><th>Status</th><th></th></tr>
+        </thead>
+        <tbody id="tester-tbody">
+          <tr class="empty-row"><td colspan="4">Loading…</td></tr>
+        </tbody>
+      </table>
+      <div class="row-form">
+        <input type="text" id="new-user-id" class="wide" placeholder="Slack User ID (e.g. U012AB3CD)" />
+        <input type="text" id="new-name" class="wide" placeholder="Display name (optional)" />
+        <button class="primary" onclick="addTester()">Add Tester</button>
+      </div>
+      <div class="flash" id="tester-flash"></div>
+    </section>
+
+    <!-- Section B: Slack Channel -->
+    <section id="sec-channel">
+      <h2>Slack Channel</h2>
+      <p class="desc">The channel where cycle-start announcements and reminders are posted.</p>
+      <div class="row-form">
+        <input type="text" id="channel-id" class="wide" placeholder="Channel ID (e.g. C012AB3CD)" />
+        <button class="primary" onclick="saveChannel()">Save</button>
+      </div>
+      <div class="channel-meta" id="channel-meta"></div>
+      <div class="flash" id="channel-flash"></div>
+    </section>
+
+  </div>
+
+  <script>
+    function esc(s) {
+      return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      }[c]));
+    }
+
+    function flash(id, msg, isErr) {
+      const el = document.getElementById(id);
+      el.textContent = msg;
+      el.className = 'flash ' + (isErr ? 'err' : 'ok');
+      clearTimeout(el._t);
+      el._t = setTimeout(() => { el.className = 'flash'; }, 4000);
+    }
+
+    // ── Tester roster ─────────────────────────────────────────────────────────
+
+    async function loadTesters() {
+      const res = await fetch('/api/settings/testers');
+      const testers = await res.json();
+      renderTesters(testers);
+    }
+
+    function renderTesters(testers) {
+      const tbody = document.getElementById('tester-tbody');
+      if (!testers.length) {
+        tbody.innerHTML = '<tr class="empty-row"><td colspan="4">No testers added yet.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = testers.map((t) => `
+        <tr data-id="${t.id}">
+          <td>${esc(t.name || '—')}</td>
+          <td><code>${esc(t.slack_user_id)}</code></td>
+          <td><span class="badge-active">${t.active ? '● Active' : '○ Inactive'}</span></td>
+          <td><button class="danger" onclick="removeTester(${t.id})">Remove</button></td>
+        </tr>`).join('');
+    }
+
+    async function addTester() {
+      const userId = document.getElementById('new-user-id').value.trim();
+      const name   = document.getElementById('new-name').value.trim();
+      if (!userId) { flash('tester-flash', 'Slack User ID is required.', true); return; }
+      const res = await fetch('/api/settings/testers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ slack_user_id: userId, name: name || undefined }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        flash('tester-flash', err.error || 'Failed to add tester.', true);
+        return;
+      }
+      const testers = await res.json();
+      renderTesters(testers);
+      document.getElementById('new-user-id').value = '';
+      document.getElementById('new-name').value = '';
+      flash('tester-flash', 'Tester added. Name will be resolved from Slack shortly if left blank.');
+    }
+
+    async function removeTester(id) {
+      if (!confirm('Remove this tester from the roster?')) return;
+      const res = await fetch('/api/settings/testers/' + id, { method: 'DELETE' });
+      if (!res.ok) { flash('tester-flash', 'Failed to remove tester.', true); return; }
+      const testers = await res.json();
+      renderTesters(testers);
+      flash('tester-flash', 'Tester removed.');
+    }
+
+    // ── Slack channel ─────────────────────────────────────────────────────────
+
+    async function loadChannel() {
+      const res = await fetch('/api/settings/channel');
+      const data = await res.json();
+      document.getElementById('channel-id').value = data.channel_id || '';
+      setChannelMeta(data.channel_id, data.channel_name);
+    }
+
+    function setChannelMeta(id, name) {
+      const el = document.getElementById('channel-meta');
+      if (!id) { el.textContent = 'No channel configured.'; return; }
+      el.textContent = name ? `#${name} (${id})` : id;
+    }
+
+    async function saveChannel() {
+      const channelId = document.getElementById('channel-id').value.trim();
+      if (!channelId) { flash('channel-flash', 'Channel ID is required.', true); return; }
+      const res = await fetch('/api/settings/channel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channel_id: channelId }),
+      });
+      const data = await res.json();
+      if (!res.ok) { flash('channel-flash', data.error || 'Failed to save channel.', true); return; }
+      setChannelMeta(data.channel_id, data.channel_name);
+      flash('channel-flash', 'Channel saved.');
+    }
+
+    // ── Init ──────────────────────────────────────────────────────────────────
+
+    loadTesters();
+    loadChannel();
+  </script>
+</body>
+</html>

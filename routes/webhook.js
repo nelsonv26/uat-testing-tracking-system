@@ -29,14 +29,21 @@ async function startCycle({ epicKey, epicName, dueDate }) {
   const cycle = db.createCycle({ epicKey, epicName, dueDate });
   console.log(`[webhook] DB insert OK — cycle id=${cycle.id}`, cycle);
 
-  const testerIds = config.getTesterIds();
-  console.log(`[webhook] resolving ${testerIds.length} tester(s): ${testerIds.join(', ')}`);
+  // Use tester_roster (DB) when populated; fall back to SLACK_USER_IDS env var.
+  let testers = db.getActiveTesters(); // [{ id, slack_user_id, name }]
+  if (testers.length === 0) {
+    console.log(`[webhook] tester_roster is empty — falling back to SLACK_USER_IDS env var`);
+    const ids = config.getTesterIds();
+    testers = ids.map((id) => ({ slack_user_id: id, name: null }));
+  }
+  console.log(`[webhook] resolving ${testers.length} tester(s): ${testers.map((t) => t.slack_user_id).join(', ')}`);
 
+  // Resolve display names for any tester without one in the roster.
   const named = await Promise.all(
-    testerIds.map(async (id) => {
-      const name = await slack.getUserName(id);
-      console.log(`[webhook]   getUserName(${id}) => "${name}"`);
-      return { id, name };
+    testers.map(async (t) => {
+      const name = t.name || (await slack.getUserName(t.slack_user_id));
+      console.log(`[webhook]   name for ${t.slack_user_id} => "${name}"`);
+      return { id: t.slack_user_id, name };
     })
   );
 
@@ -66,16 +73,26 @@ async function startCycle({ epicKey, epicName, dueDate }) {
     console.error('[webhook] createCanvas FAILED:', err.data?.error || err.message, err.data || '');
   }
 
-  // DM each tester.
+  // Post channel notification (Feature 1).
+  console.log(`[webhook] posting channel notification for cycle ${cycle.id}…`);
+  await slack.postCycleStart({
+    cycle,
+    assignments,
+    jiraUrl,
+    testerUrlFn: config.testerUrl,
+  });
+
+  // DM each tester individually (Feature 2).
   console.log(`[webhook] sending DMs to ${assignments.length} tester(s)…`);
   await Promise.all(
     assignments.map(async (a) => {
       try {
         await slack.dmTester({
           slackUserId: a.slack_user_id,
+          name: a.name,
           epicName,
+          epicKey,
           dueDate,
-          canvasUrl,
           jiraUrl,
           testerUrl: config.testerUrl(a.slack_user_id, cycle.id),
         });
@@ -96,11 +113,75 @@ async function startCycle({ epicKey, epicName, dueDate }) {
   return saved;
 }
 
+/**
+ * Extract issue fields from whichever payload shape Jira Automation sends.
+ *
+ * Shape A — custom JSON body we defined:
+ *   { issue: { key, fields: { summary, duedate, issuetype, status } }, changelog: { items } }
+ *
+ * Shape B — Jira Automation native smart-values (flat top-level keys):
+ *   { key, summary, issueType, status, dueDate, ... }
+ *
+ * Shape C — Jira Automation wraps our JSON as a string in `body` or `data`:
+ *   { body: "{\"issue\":{...}}" }
+ */
+function parsePayload(raw, parsed) {
+  // Shape A: standard Jira webhook envelope
+  if (parsed.issue?.key) {
+    const issue = parsed.issue;
+    const fields = issue.fields || {};
+    return {
+      shape: 'A (standard envelope)',
+      epicKey: issue.key,
+      epicName: fields.summary || issue.key,
+      dueDate: fields.duedate || null,
+      issueType: fields.issuetype?.name || null,
+      currentStatus: fields.status?.name || null,
+      changelogItems: parsed.changelog?.items || [],
+    };
+  }
+
+  // Shape C: our JSON was sent as a string inside a wrapper key
+  const stringField = parsed.body || parsed.data || parsed.payload;
+  if (typeof stringField === 'string') {
+    try {
+      const inner = JSON.parse(stringField);
+      if (inner.issue?.key) {
+        console.log('[webhook] shape C detected — unwrapped nested JSON string');
+        return parsePayload(raw, inner);
+      }
+    } catch (_) { /* not JSON */ }
+  }
+
+  // Shape B: flat Jira Automation smart-values
+  const epicKey = parsed.key || parsed.issueKey || parsed.epicKey || null;
+  if (epicKey) {
+    return {
+      shape: 'B (flat smart-values)',
+      epicKey,
+      epicName: parsed.summary || parsed.epicName || epicKey,
+      dueDate: parsed.dueDate || parsed.due_date || null,
+      issueType: parsed.issueType || parsed.issue_type || null,
+      currentStatus: parsed.status || parsed.statusName || null,
+      changelogItems: [],
+    };
+  }
+
+  // Unknown — return nulls; the caller will log and bail out
+  return {
+    shape: 'unknown',
+    epicKey: null, epicName: null, dueDate: null,
+    issueType: null, currentStatus: null, changelogItems: [],
+  };
+}
+
 router.post('/jira', async (req, res) => {
   try {
     console.log(`\n[webhook] ── incoming POST /webhook/jira ──────────────────────────`);
+    console.log(`[webhook] content-type: ${req.headers['content-type']}`);
     console.log(`[webhook] headers: x-webhook-secret=${req.headers['x-webhook-secret']} query.secret=${req.query.secret}`);
-    console.log(`[webhook] body:`, JSON.stringify(req.body, null, 2));
+    console.log(`[webhook] raw body: ${req.rawBody}`);
+    console.log(`[webhook] parsed body:`, JSON.stringify(req.body, null, 2));
 
     const provided = req.query.secret || req.headers['x-webhook-secret'];
     if (!secretValid(provided)) {
@@ -109,24 +190,19 @@ router.post('/jira', async (req, res) => {
     }
     console.log(`[webhook] secret OK`);
 
-    const body = req.body || {};
-    const issue = body.issue || {};
-    const fields = issue.fields || {};
-    const issueType = fields.issuetype?.name;
-    const epicKey = issue.key;
-    const epicName = fields.summary || epicKey;
-    const dueDate = fields.duedate || null;
+    const { shape, epicKey, epicName, dueDate, issueType, currentStatus, changelogItems } =
+      parsePayload(req.rawBody, req.body || {});
+
+    console.log(`[webhook] payload shape: ${shape}`);
+    console.log(`[webhook] parsed — issueType="${issueType}" epicKey=${epicKey} epicName="${epicName}" dueDate=${dueDate}`);
 
     const trigger = config.triggerStatus();
-    const changelogItems = body.changelog?.items || [];
     const statusChange = changelogItems.find((it) => it.field === 'status' || it.fieldId === 'status');
-    // Use the Jira changelog `toString` field (the status name it changed TO).
-    // Access via bracket notation to avoid accidentally calling Object.prototype.toString.
+    // Bracket notation: avoids accidentally reading Object.prototype.toString instead of
+    // the Jira changelog field of the same name.
     const changedTo = statusChange?.['toString'];
-    const currentStatus = fields.status?.name;
     const newStatus = changedTo || currentStatus;
 
-    console.log(`[webhook] parsed — issueType="${issueType}" epicKey=${epicKey} epicName="${epicName}" dueDate=${dueDate}`);
     console.log(`[webhook] status — changedTo="${changedTo}" currentStatus="${currentStatus}" effectiveStatus="${newStatus}" triggerStatus="${trigger}"`);
 
     const isEpic = (issueType || '').toLowerCase() === 'epic';

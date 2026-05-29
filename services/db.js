@@ -9,9 +9,6 @@ if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
 const DB_PATH = process.env.DB_PATH || path.join(DATA_DIR, 'uat.db');
 
-// sql.js is async-initialised; we expose a promise that callers await via
-// the module-level `ready` export, but all the named functions below defer
-// internally so callers that await `ready` first will work correctly.
 let db;
 
 const ready = initSqlJs().then((SQL) => {
@@ -48,17 +45,32 @@ const ready = initSqlJs().then((SQL) => {
 
   db.run(`CREATE INDEX IF NOT EXISTS idx_assignments_cycle ON tester_assignments(cycle_id)`);
 
+  db.run(`
+    CREATE TABLE IF NOT EXISTS tester_roster (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      slack_user_id TEXT NOT NULL UNIQUE,
+      name          TEXT,
+      active        INTEGER NOT NULL DEFAULT 1
+    )
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS app_config (
+      key   TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    )
+  `);
+
   persist();
 });
 
-// Flush the in-memory database to disk as a binary buffer.
+// ─── Core helpers ────────────────────────────────────────────────────────────
+
 function persist() {
   const data = db.export();
   fs.writeFileSync(DB_PATH, Buffer.from(data));
 }
 
-// Execute a statement that does not return rows (INSERT / UPDATE / DELETE).
-// Returns { changes, lastInsertRowid } to mirror the better-sqlite3 interface.
 function run(sql, params = []) {
   db.run(sql, params);
   const changes = db.getRowsModified();
@@ -67,7 +79,6 @@ function run(sql, params = []) {
   return { changes, lastInsertRowid };
 }
 
-// Return all matching rows as plain objects.
 function all(sql, params = []) {
   const stmt = db.prepare(sql);
   stmt.bind(params);
@@ -77,13 +88,12 @@ function all(sql, params = []) {
   return rows;
 }
 
-// Return the first matching row or undefined.
 function get(sql, params = []) {
   const results = all(sql, params);
   return results.length ? results[0] : undefined;
 }
 
-// ─── UAT cycles ────────────────────────────────────────────────────────────
+// ─── UAT cycles ──────────────────────────────────────────────────────────────
 
 function findActiveCycleByEpic(epicKey) {
   return get(
@@ -124,7 +134,12 @@ function listCycles() {
   });
 }
 
-// ─── Tester assignments ──────────────────────────────────────────────────
+/** Active cycles that have a due_date set — used by the reminder scheduler. */
+function listActiveCyclesWithDueDate() {
+  return all(`SELECT * FROM uat_cycles WHERE status = 'active' AND due_date IS NOT NULL`);
+}
+
+// ─── Tester assignments ──────────────────────────────────────────────────────
 
 function addAssignment({ cycleId, slackUserId, name }) {
   run(
@@ -164,17 +179,72 @@ function saveNotes({ cycleId, slackUserId, notes }) {
   );
 }
 
+// ─── Tester roster ───────────────────────────────────────────────────────────
+
+function getActiveTesters() {
+  return all(`SELECT * FROM tester_roster WHERE active = 1 ORDER BY id ASC`);
+}
+
+function listAllTesters() {
+  return all(`SELECT * FROM tester_roster ORDER BY id ASC`);
+}
+
+function rosterIsEmpty() {
+  const row = get(`SELECT COUNT(*) AS cnt FROM tester_roster`);
+  return !row || row.cnt === 0;
+}
+
+function addTesterToRoster({ slackUserId, name }) {
+  const { lastInsertRowid } = run(
+    `INSERT OR IGNORE INTO tester_roster (slack_user_id, name) VALUES (?, ?)`,
+    [slackUserId, name || null]
+  );
+  return lastInsertRowid;
+}
+
+function updateTesterName(id, name) {
+  run(`UPDATE tester_roster SET name = ? WHERE id = ?`, [name, id]);
+}
+
+function removeTesterFromRoster(id) {
+  run(`DELETE FROM tester_roster WHERE id = ?`, [id]);
+}
+
+// ─── App config ──────────────────────────────────────────────────────────────
+
+function getConfig(key) {
+  const row = get(`SELECT value FROM app_config WHERE key = ?`, [key]);
+  return row ? row.value : null;
+}
+
+function setConfig(key, value) {
+  run(`INSERT OR REPLACE INTO app_config (key, value) VALUES (?, ?)`, [key, String(value)]);
+}
+
 module.exports = {
   ready,
+  // cycles
   findActiveCycleByEpic,
   createCycle,
   setCanvasId,
   closeCycle,
   getCycle,
   listCycles,
+  listActiveCyclesWithDueDate,
+  // assignments
   addAssignment,
   listAssignments,
   getAssignment,
   completeAssignment,
   saveNotes,
+  // roster
+  getActiveTesters,
+  listAllTesters,
+  rosterIsEmpty,
+  addTesterToRoster,
+  updateTesterName,
+  removeTesterFromRoster,
+  // config
+  getConfig,
+  setConfig,
 };

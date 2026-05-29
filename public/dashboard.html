@@ -66,7 +66,10 @@
       <h1>UAT Dashboard</h1>
       <div class="sub">Monitor every UAT cycle in real time</div>
     </div>
-    <div class="refresh">auto-refresh: 10s</div>
+    <nav style="display:flex;gap:20px;align-items:center;">
+      <span class="refresh">auto-refresh: 10s</span>
+      <a href="/settings" style="font-size:13px;color:var(--muted);text-decoration:none;" onmouseover="this.style.color='var(--text)'" onmouseout="this.style.color='var(--muted)'">⚙️ Settings</a>
+    </nav>
   </header>
   <div class="wrap" id="root">
     <div class="empty">Loading…</div>
